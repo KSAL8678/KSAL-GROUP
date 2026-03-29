@@ -1,5 +1,5 @@
 import streamlit as st
-from st_gsheets_connection import GSheetsConnection
+from stremlit_gsheets_connection import GSheetsConnection
 import pandas as pd
 
 # Page Config
