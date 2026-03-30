@@ -2,83 +2,78 @@ import streamlit as st
 import pandas as pd
 from datetime import datetime
 
-# 1. Page Configuration
+# 1. Setup
 st.set_page_config(page_title="KSAL Movement Report", layout="wide")
 
-# Google Sheet Connection
 SHEET_ID = "1F0fWEZSmOjC5it_q0ew_hulVPVzEHwdgpVvEKaT0ndk"
 URL = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/gviz/tq?tqx=out:csv&gid=1114565751"
 
-@st.cache_data(ttl=2)
+@st.cache_data(ttl=1)
 def load_data():
     try:
+        # Reading raw data for better extraction
         df = pd.read_csv(URL)
         return df
     except:
         return None
 
-# 2. Main App Logic
-st.title("🚛 KSAL Master Movement & Income Tracker")
+# 2. Main App
+st.title("🚛 KSAL Master Movement Tracker")
 df = load_data()
 
 if df is not None:
-    menu = st.sidebar.radio("Navigation", ["Dashboard", "New Trip Entry"])
+    # Sidebar for Navigation & Stock Purchase
+    menu = st.sidebar.radio("Navigation", ["Daily Trip Entry", "Purchase Stock (Stock Add)", "Dashboard"])
     
-    if menu == "Dashboard":
-        # Vehicle selection
-        vehicles = df.iloc[:, 3].dropna().unique().tolist()
-        v_sel = st.selectbox("Select Vehicle to Check Status", vehicles)
-        
-        # Diesel stock calculation (Purchased - Used)
-        v_data = df[df.iloc[:, 3] == v_sel]
-        stock = v_data.iloc[:, 16].sum() - v_data.iloc[:, 15].sum()
-        
-        st.metric(f"Current Diesel Stock for {v_sel}", f"{stock} Liters")
-        st.subheader("Recent Trip Logs")
-        st.dataframe(df.tail(10))
+    # Extracting lists for dropdowns
+    vehicle_list = sorted(df.iloc[:, 3].dropna().unique().tolist())
+    driver_list = sorted(df.iloc[:, 5].dropna().unique().tolist())
 
-    elif menu == "New Trip Entry":
-        st.subheader("📝 Detailed Trip & Finance Form")
-        with st.form("master_trip_form", clear_on_submit=True):
-            # Row 1: Basic Info
+    if menu == "Daily Trip Entry":
+        st.subheader("📝 Detailed Trip Form")
+        with st.form("trip_form", clear_on_submit=True):
+            # Row 1: Fixed Dropdowns
             c1, c2, c3, c4 = st.columns(4)
-            trip_date = c1.date_input("Trip Date", datetime.now())
-            trip_time = c2.time_input("Trip Time", datetime.now())
-            v_no = c3.selectbox("Vehicle No", df.iloc[:, 3].dropna().unique().tolist())
-            d_name = c4.selectbox("Driver Name", df.iloc[:, 5].dropna().unique().tolist())
+            t_date = c1.date_input("Trip Date", datetime.now())
+            t_time = c2.time_input("Trip Time", datetime.now())
+            v_no = c3.selectbox("Vehicle No", vehicle_list) # Fix: Now showing sorted list
+            d_name = c4.selectbox("Driver Name", driver_list) # Fix: Now showing sorted list
 
-            # Row 2: Cargo Details
+            # Row 2: Trip Info
             c5, c6, c7, c8 = st.columns(4)
             cont_1 = c5.text_input("Container-1")
             cont_2 = c6.text_input("Container-2")
             size = c7.selectbox("Size", ["20", "40"])
             status = c8.selectbox("Status", ["MTY", "LDD"])
 
-            # Row 3: Route & Party
+            # Row 3: Finance & Diesel
             c9, c10, c11, c12 = st.columns(4)
-            route_from = c9.text_input("From")
-            route_to = c10.text_input("To")
-            cycle = c11.text_input("Cycle")
-            party = c12.text_input("Party Name")
+            p_rate = c9.number_input("Party Rate", min_value=0.0)
+            d_sal = c10.number_input("Driver Salary", min_value=0.0)
+            g_pass = c11.number_input("Gate Pass", min_value=0.0)
+            t_status = c12.selectbox("Trip Status", ["Full", "Return"])
 
-            # Row 4: Finance & Diesel
-            c13, c14, c15, c16 = st.columns(4)
-            party_rate = c13.number_input("Party Rate (Income)", min_value=0.0)
-            driver_sal = c14.number_input("Driver Salary", min_value=0.0)
-            gate_pass = c15.number_input("Gate Pass Charge", min_value=0.0)
-            t_status = c16.selectbox("Trip Status", ["Full", "Return"])
+            # Diesel Usage Section (Action Removed as requested)
+            st.divider()
+            c13, c14 = st.columns(2)
+            d_liters = c13.number_input("Trip Diesel Used (Liters)", min_value=0.0)
+            d_rate = c14.number_input("Diesel Rate", min_value=0.0)
 
-            # Row 5: Diesel Details
-            c17, c18, c19 = st.columns(3)
-            d_type = c17.radio("Diesel Action", ["Usage (Trip)", "Purchase (Stock)"])
-            d_liters = c18.number_input("Diesel Liters", min_value=0.0)
-            d_rate = c19.number_input("Diesel Rate", min_value=0.0)
+            # Auto Income Calculation
+            d_cost = d_liters * d_rate
+            net_income = p_rate - g_pass - d_cost - d_sal
 
-            # Auto Calculations
-            d_total_amt = d_liters * d_rate
-            total_income = party_rate - gate_pass - d_total_amt - driver_sal
+            if st.form_submit_button("Save Trip Report"):
+                st.info(f"Calculated Trip Income: ₹{net_income}")
+                st.success(f"Trip saved and {d_liters}L deducted from stock.")
 
-            if st.form_submit_button("Save Movement Report"):
-                st.write(f"### Final Trip Income: ₹{total_income}")
-                st.success("Trip and Diesel entry recorded successfully!")
-                st.balloons()
+    elif menu == "Purchase Stock (Stock Add)":
+        st.subheader("⛽ Add New Diesel to Stock (Purchase)")
+        with st.form("purchase_form"):
+            v_purchase = st.selectbox("Select Vehicle", vehicle_list)
+            p_liters = st.number_input("Liters Purchased", min_value=0.0)
+            if st.form_submit_button("Add to Stock"):
+                st.success(f"Added {p_liters}L to {v_purchase} stock.")
+
+else:
+    st.error("Could not load vehicle/driver lists from Sheet.")
