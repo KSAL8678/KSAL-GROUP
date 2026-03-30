@@ -1,19 +1,27 @@
 import streamlit as st
-from stremlit_gsheets_connection import GSheetsConnection
 import pandas as pd
 
-# Page Config
+# 1. Page Configuration
 st.set_page_config(page_title="KSAL Transport Management", layout="wide")
 
-# Connection to Google Sheets
-conn = st.connection("gsheets", type=GSheetsConnection)
+# 2. Google Sheet Connection for Sheet2
+# Change the gid to match your Sheet2 (usually gid=Sheet2 ID)
+sheet_id = "1F0fWEZSmOjC5it_q0ew_hulVPVzEHwdgpVvEKaT0ndk"
+# Added 'gid' to specifically target Sheet2
+sheet_url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=csv&gid=1114565751"
 
-# Authentication logic
+@st.cache_data(ttl=60)
+def load_data():
+    # Load Sheet2 data and skip the first empty column if needed
+    df = pd.read_csv(sheet_url)
+    return df
+
+# 3. Login Logic
 if 'logged_in' not in st.session_state:
     st.session_state.logged_in = False
 
 if not st.session_state.logged_in:
-    st.title("🚚 KSAL Transport Login")
+    st.title("🚛 KSAL Transport Login")
     user = st.text_input("Username")
     password = st.text_input("Password", type="password")
     if st.button("Login"):
@@ -21,84 +29,32 @@ if not st.session_state.logged_in:
             st.session_state.logged_in = True
             st.rerun()
         else:
-            st.error("Invalid Username or Password")
+            st.error("Invalid Login")
 else:
-    st.sidebar.title("Menu")
-    page = st.sidebar.radio("Select Page", ["Dashboard", "New Trip Entry"])
-
-    # Read existing data
-    df = conn.read()
-    if not df.empty:
-        df['DATE'] = pd.to_datetime(df['DATE'])
-
-    if page == "Dashboard":
-        st.title("📊 Monthly Reports")
-        if not df.empty:
-            # 12. Auto-sorting: Date Old to New
-            sorted_df = df.sort_values(by='DATE', ascending=True)
-            st.dataframe(sorted_df, use_container_width=True)
-        else:
-            st.warning("No data found.")
-
-    elif page == "New Trip Entry":
-        st.title("📝 Register New Trip")
+    st.title("Main Dashboard - KSAL")
+    
+    try:
+        df = load_data()
         
-        # 1. Automatic SR Number
-        next_sr = len(df) + 1 if not df.empty else 1
+        # Mapping columns based on your sheet
+        # B is typically 'Unnamed: 1' and C is 'Unnamed: 2' in raw CSV if headers are missing
+        # Let's use column index to be safe
+        vehicles = df.iloc[:, 1].dropna().unique().tolist() # Column B
+        drivers = df.iloc[:, 2].dropna().unique().tolist()  # Column C
 
-        with st.form("entry_form"):
-            col1, col2 = st.columns(2)
-            with col1:
-                st.info(f"Auto SR No: {next_sr}")
-                date = st.date_input("Trip Date")
-                vehicle_no = st.text_input("VEHICLE NO")
-                driver_name = st.text_input("DRIVER NAME")
-                size = st.selectbox("SIZE", ["20 FT", "40 FT"])
-                
-                # 3. Double Container for 20 FT
-                cont1 = st.text_input("CONTAINER-1 (11 Chars)")
-                cont2 = ""
-                if size == "20 FT":
-                    cont2 = st.text_input("CONTAINER-2 (Optional)")
+        col1, col2 = st.columns(2)
+        with col1:
+            st.selectbox("ગાડી નંબર પસંદ કરો (Vehicle)", vehicles)
+        with col2:
+            st.selectbox("ડ્રાઈવરનું નામ પસંદ કરો (Driver)", drivers)
             
-            with col2:
-                # 13. Trip Status Dropdown
-                status = st.selectbox("STATUS", ["Full Trip", "Return Trip"])
-                loc_from = st.text_input("FROM")
-                loc_to = st.text_input("TO")
-                party = st.text_input("PARTY")
-                diesel = st.number_input("DRIVERSAL (Diesel)", min_value=0.0)
-                # Extra field for Cycle if needed
-                cycle = st.text_input("CYCLE")
+        st.divider()
+        st.subheader("નવી ટ્રીપ એન્ટ્રી")
+        # Add entry fields here
+        
+    except Exception as e:
+        st.error(f"Error: {e}. Please check Sheet2 gid and sharing settings.")
 
-            submit = st.form_submit_button("Save Trip")
-
-            if submit:
-                # 2. Container Validation
-                if len(cont1) != 11:
-                    st.error("Error: CONTAINER-1 must be exactly 11 characters!")
-                else:
-                    new_data = pd.DataFrame([{
-                        "SR": next_sr,
-                        "DATE": date.strftime('%Y-%m-%d'),
-                        "VEHICLE NO": vehicle_no.upper(),
-                        "DRIVER NAME": driver_name,
-                        "CONTAINER-1": cont1.upper(),
-                        "CONTAINER-2": cont2.upper() if cont2 else "",
-                        "SIZE": size,
-                        "STATUS": status,
-                        "FROM": loc_from,
-                        "TO": loc_to,
-                        "CYCLE": cycle,
-                        "PARTY": party,
-                        "DRIVERSAL": diesel
-                    }])
-                    
-                    # Merge, Sort and Update
-                    updated_df = pd.concat([df, new_data], ignore_index=True)
-                    updated_df['DATE'] = pd.to_datetime(updated_df['DATE'])
-                    updated_df = updated_df.sort_values(by='DATE', ascending=True)
-                    updated_df['SR'] = range(1, len(updated_df) + 1)
-                    
-                    conn.update(data=updated_df)
-                    st.success("Trip saved in CONTAINER-1 & CONTAINER-2 columns!")
+    if st.button("Logout"):
+        st.session_state.logged_in = False
+        st.rerun()
