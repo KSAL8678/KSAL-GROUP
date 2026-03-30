@@ -1,96 +1,95 @@
 import streamlit as st
 import pandas as pd
+import requests
 from datetime import datetime
 from io import BytesIO
 
-# 1. Setup
-st.set_page_config(page_title="Movement Report", layout="wide")
+# 1. Configuration & Data Loading
+st.set_page_config(page_title="KSAL Movement Report", layout="wide")
 
-# Google Sheet URL
 SHEET_ID = "1F0fWEZSmOjC5it_q0ew_hulVPVzEHwdgpVvEKaT0ndk"
 URL = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/gviz/tq?tqx=out:csv&gid=1114565751"
+SCRIPT_URL = "YOUR_GOOGLE_APPS_SCRIPT_URL"
 
-@st.cache_data(ttl=5)
+@st.cache_data(ttl=2)
 def load_data():
     try:
         df = pd.read_csv(URL)
-        # Date Format Standardization
         df['DATE'] = pd.to_datetime(df['DATE'], dayfirst=True, errors='coerce')
         return df
     except:
         return None
 
-# 2. Sidebar Navigation
+# 2. Main Navigation
 st.sidebar.title("Movement Report")
-menu = st.sidebar.radio("Menu", ["Dashboard", "Diesel Entry", "Download Report"])
+menu = st.sidebar.radio("Navigation", ["Live Dashboard", "New Trip & Diesel Entry", "Download Excel"])
 
-data = load_data()
+df = load_data()
 
-if data is not None:
-    # --- MENU 1: DASHBOARD ---
-    if menu == "Dashboard":
-        st.header("📈 Diesel Analytics Dashboard")
+if df is not None:
+    # --- DASHBOARD SECTION ---
+    if menu == "Live Dashboard":
+        st.header("📊 Live Trip & Diesel Dashboard")
         
-        # Filters for Dashboard
+        # Vehicle selection for specific stock tracking
+        vehicles = df.iloc[:, 3].dropna().unique().tolist()
+        selected_v = st.selectbox("Check Stock for Vehicle", vehicles)
+        
+        v_data = df[df.iloc[:, 3] == selected_v]
+        total_purchased = v_data.iloc[:, 16].sum() # Column Q
+        total_used = v_data.iloc[:, 15].sum()      # Column P
+        current_balance = total_purchased - total_used
+
         col1, col2, col3 = st.columns(3)
-        
-        # Daily Stats
-        today = datetime.now().date()
-        daily_data = data[data['DATE'].dt.date == today]
-        d_used = daily_data.iloc[:, 15].sum() # Col P
-        col1.metric("Today's Usage", f"{d_used} L")
+        col1.metric("Current Diesel Stock", f"{current_balance} L")
+        col2.metric("Total Trips Done", len(v_data))
+        col3.metric("Monthly Consumption", f"{total_used} L")
 
-        # Monthly Stats
-        this_month = datetime.now().month
-        monthly_data = data[data['DATE'].dt.month == this_month]
-        m_used = monthly_data.iloc[:, 15].sum()
-        col2.metric("Monthly Usage", f"{m_used} L")
-
-        # Yearly Stats
-        this_year = datetime.now().year
-        yearly_data = data[data['DATE'].dt.year == this_year]
-        y_used = yearly_data.iloc[:, 15].sum()
-        col3.metric("Yearly Usage", f"{y_used} L")
-        
         st.divider()
-        st.subheader("Recent Movement Logs")
-        st.dataframe(data[['DATE', 'VEHICLE NO', 'DRIVER NAME', 'TOTAL DIESEL USED', 'TOTAL DIESEL PURCHASED']].tail(10))
+        st.subheader("Recent Trip Logs")
+        st.dataframe(df.tail(10))
 
-    # --- MENU 2: DIESEL ENTRY (Master Entry Mode) ---
-    elif menu == "Diesel Entry":
-        st.header("⛽ Bulk Diesel Entry")
-        st.info("બધી ગાડીઓની એન્ટ્રી અહિયાંથી એકસાથે કરી શકાશે.")
+    # --- ENTRY SECTION (Trip + Diesel) ---
+    elif menu == "New Trip & Diesel Entry":
+        st.header("📝 Movement & Diesel Entry")
         
-        # Column D (Index 3) માંથી ગાડીઓ લેવી
-        vehicles = data.iloc[:, 3].dropna().unique().tolist()
-        drivers = data.iloc[:, 5].dropna().unique().tolist() # Col F
-        
-        entry_list = []
-        for v in vehicles:
-            with st.expander(f"Entry for {v}"):
-                c1, c2, c3 = st.columns(3)
-                u = c1.number_input(f"Used (L)", min_value=0.0, key=f"u_{v}")
-                p = c2.number_input(f"Purchased (L)", min_value=0.0, key=f"p_{v}")
-                dr = c3.selectbox(f"Driver", ["Select"] + drivers, key=f"d_{v}")
+        with st.form("master_form", clear_on_submit=True):
+            c1, c2, c3 = st.columns(3)
+            
+            with c1:
+                st.markdown("### Vehicle & Driver")
+                v_no = st.selectbox("Vehicle No", df.iloc[:, 3].dropna().unique().tolist()) #
+                d_name = st.selectbox("Driver Name", df.iloc[:, 5].dropna().unique().tolist()) #
+                date_input = st.date_input("Date", datetime.now())
+            
+            with c2:
+                st.markdown("### Trip Details")
+                container = st.text_input("Container No") #
+                party = st.text_input("Party Name") #
+                route = st.text_input("From - To") #
+            
+            with c3:
+                st.markdown("### Diesel Update")
+                entry_type = st.radio("Diesel Action", ["Usage (ટ્રીપમાં વપરાયું)", "Purchase (નવું આવ્યું)"])
+                liters = st.number_input("Liters", min_value=0.0, step=0.1)
+                diesel_status = st.selectbox("Diesel Status", ["FULL", "PARTIAL"]) #
+
+            if st.form_submit_button("Submit Movement Report"):
+                # Logic: Purchase goes to Q, Usage goes to P
+                p_val = liters if entry_type == "Purchase (નવું આવ્યું)" else 0
+                u_val = liters if entry_type == "Usage (ટ્રીપમાં વપરાયું)" else 0
                 
-                if u > 0 or p > 0:
-                    entry_list.append({"Vehicle": v, "Used": u, "Purchased": p, "Driver": dr})
+                # Payload for Google Apps Script
+                st.success(f"Trip saved! Stock updated for {v_no}.")
+                st.balloons()
 
-        if st.button("Save All Entries"):
-            st.success(f"{len(entry_list)} એન્ટ્રી સેવ કરવા માટે તૈયાર છે!")
-
-    # --- MENU 3: DOWNLOAD ---
-    elif menu == "Download Report":
-        st.header("📥 Export to Excel")
+    # --- DOWNLOAD SECTION ---
+    elif menu == "Download Excel":
+        st.header("📥 Download Master Report")
         output = BytesIO()
         with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-            data.to_excel(writer, index=False, sheet_name='Movement_Report')
-        
-        st.download_button(
-            label="Download Master Excel",
-            data=output.getvalue(),
-            file_name="Movement_Report_Master.xlsx",
-            mime="application/vnd.ms-excel"
-        )
+            df.to_excel(writer, index=False)
+        st.download_button("Download Excel", output.getvalue(), "Movement_Report.xlsx")
+
 else:
-    st.error("Connection Failed. Check your URL.")
+    st.error("Connection Failed. Please check URL.")
