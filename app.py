@@ -4,20 +4,16 @@ import pandas as pd
 # 1. Page Configuration
 st.set_page_config(page_title="KSAL Transport Management", layout="wide", page_icon="🚛")
 
-# 2. Google Sheet Settings (Direct Access)
-# Using the sheet ID and GID you provided
-SHEET_ID = "1F0fWEZSmOjC5it_q0ew_hulVPVzEHwdgpVvEKaT0ndk"
-SHEET2_GID = "1114565751"
-
-# Construction of the export URL
-# This specific format is most stable for public sheets
-SHEET_URL = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=csv&gid={SHEET2_GID}"
+# 2. Google Sheet Connection Logic
+# Jagatsingh, I have used your specific Sheet ID and GID directly in the link below
+SHEET_URL = "https://docs.google.com/spreadsheets/d/1F0fWEZSmOjC5it_q0ew_hulVPVzEHwdgpVvEKaT0ndk/export?format=csv&gid=1114565751"
 
 @st.cache_data(ttl=60)
-def load_sheet_data():
+def load_data_from_google():
     try:
-        # Fetching data using pandas
-        return pd.read_csv(SHEET_URL)
+        # Fetching data as CSV directly
+        df = pd.read_csv(SHEET_URL)
+        return df
     except Exception as e:
         return None
 
@@ -25,16 +21,29 @@ def load_sheet_data():
 if 'logged_in' not in st.session_state:
     st.session_state.logged_in = False
 
-# 4. Dashboard Logic
+# 4. Login Logic
+def login_screen():
+    st.title("🚛 KSAL Transport Login")
+    username = st.text_input("Username")
+    password = st.text_input("Password", type="password")
+    
+    if st.button("Login"):
+        if username == "admin" and password == "jagatsinh@123":
+            st.session_state.logged_in = True
+            st.rerun()
+        else:
+            st.error("Invalid Username or Password")
+
+# 5. Main Dashboard
 def main_dashboard():
     st.title("Welcome to KSAL Dashboard")
     
-    df = load_sheet_data()
+    # Try to load data
+    df = load_data_from_google()
     
     if df is not None:
         try:
-            # According to your screenshot: Column B is Vehicle, Column C is Driver
-            # We use iloc to pick columns by position to avoid header naming issues
+            # Your Sheet2 has Vehicle in Col B (index 1) and Driver in Col C (index 2)
             vehicle_list = df.iloc[:, 1].dropna().unique().tolist()
             driver_list = df.iloc[:, 2].dropna().unique().tolist()
 
@@ -43,31 +52,20 @@ def main_dashboard():
                 st.selectbox("Select Vehicle No", ["Select"] + vehicle_list)
             with col2:
                 st.selectbox("Select Driver Name", ["Select"] + driver_list)
-            
-            st.success("Data successfully loaded from Google Sheet!")
+                
+            st.success("Success: Connection established with Sheet2!")
             
         except Exception as e:
-            st.error("Sheet format error. Please check Column B and C in Sheet2.")
+            st.error(f"Error parsing sheet: {e}")
     else:
-        st.error("Connection Error: Please check if Google Sheet is shared 'Anyone with link'.")
+        # This error is shown in your latest photo
+        st.error("Connection Error: Still unable to fetch data. Please double check Google Sheet 'Share' settings.")
 
     if st.sidebar.button("Logout"):
         st.session_state.logged_in = False
         st.rerun()
 
-# 5. Login Logic
-def login_screen():
-    st.title("🚛 KSAL Transport Login")
-    user = st.text_input("Username")
-    pwd = st.text_input("Password", type="password")
-    if st.button("Login"):
-        if user == "admin" and pwd == "jagatsinh@123":
-            st.session_state.logged_in = True
-            st.rerun()
-        else:
-            st.error("Invalid Username or Password")
-
-# Execution
+# Application Entry Point
 if not st.session_state.logged_in:
     login_screen()
 else:
