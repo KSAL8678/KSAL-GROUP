@@ -9,7 +9,7 @@ st.set_page_config(page_title="KSAL Master System", layout="wide")
 # URLs
 SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwEljISVjYuTRC4zZ6yUEQwGltTnlbekDH-IdfdED-pzQ1TsobAXXZbPUskzR0KiAHj/exec"
 SHEET_ID = "1F0fWEZSmOjC5it_q0ew_hulVPVzEHwdgpVvEKaT0ndk"
-URL = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/gviz/tq?tqx=out:csv&gid=1114565751"
+URL = f"https://script.google.com/macros/s/AKfycbxMVhNqDAkHwU9XZgT9VgXapx79myehDCqdDDayTO1AUxHEALbaoxs3jfQO7CQav-vq/exec"
 
 @st.cache_data(ttl=1)
 def load_data():
