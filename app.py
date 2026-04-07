@@ -84,7 +84,7 @@ elif menu == "MOVEMENT ENTRY":
 
     # 14. Salary Logic
     # 40ft = 200, 20ft = 400 (based on your 1*40 and 2*20 logic)
-    sal_val = 200.0 if size == "40" else 400.0
+    sal_val = 200.0 if size == "40" else 200.0
     salary = st.number_input("14. DRIVER SALARY", value=sal_val)
 
     # 15. Trip Status
