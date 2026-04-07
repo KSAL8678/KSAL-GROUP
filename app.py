@@ -1,243 +1,157 @@
 import streamlit as st
 import pandas as pd
-import datetime
+import sqlite3
+from datetime import datetime
+import io
 
-st.set_page_config(page_title="Transport System", layout="wide")
+# --- DATABASE SETUP ---
+conn = sqlite3.connect('ksal_master.db', check_same_thread=False)
+c = conn.cursor()
 
-# ---------------- SESSION ----------------
+# 17 Points Database Structure
+c.execute('''CREATE TABLE IF NOT EXISTS movement 
+             (sr INTEGER, date TEXT, time TEXT, v_no TEXT, name TEXT, cont1 TEXT, cont2 TEXT, 
+              size TEXT, status TEXT, src TEXT, dest TEXT, cycle TEXT, party TEXT, 
+              salary REAL, trip_status TEXT, diesel_work REAL, remarks TEXT)''')
 
-if "movement" not in st.session_state:
-    st.session_state.movement = pd.DataFrame(columns=[
-        "SR","Date","Time","Vehicle","Name","Container1","Container2","Size",
-        "Status","From","To","Cycle","Party","DriverSalary","TripStatus",
-        "WorkDiesel","Remarks"
-    ])
+c.execute('''CREATE TABLE IF NOT EXISTS diesel_entry 
+             (date TEXT, v_no TEXT, issued REAL, name TEXT, rate REAL, amount REAL, 
+              pump TEXT, paid REAL, outstanding REAL)''')
 
-if "diesel" not in st.session_state:
-    st.session_state.diesel = pd.DataFrame(columns=[
-        "Date","Vehicle","IssuedDiesel","Driver","Rate","Amount","Pump","Paid"
-    ])
+c.execute('''CREATE TABLE IF NOT EXISTS diesel_chart 
+             (route TEXT PRIMARY KEY, full_diesel REAL, return_diesel REAL)''')
+conn.commit()
 
-# ---------------- MENU ----------------
-
-menu = st.sidebar.selectbox(
-    "MENU",
-    ["Dashboard","Movement Entry","Diesel Entry","Diesel Chart"]
-)
-
-# ---------------- DASHBOARD ----------------
-
-if menu == "Dashboard":
-
-    st.title("🚛 Transport Dashboard")
-
-    filter_type = st.selectbox(
-        "Trip Filter",
-        ["Today","Monthly","Yearly"]
-    )
-
-    df = st.session_state.movement
-
+# --- AUTO-SORT & UPDATE SR FUNCTION ---
+def sort_and_update_sr():
+    df = pd.read_sql("SELECT * FROM movement", conn)
     if not df.empty:
+        # Combined Date and Time for perfect sorting
+        df['dt_temp'] = pd.to_datetime(df['date'] + ' ' + df['time'])
+        df = df.sort_values(by='dt_temp').reset_index(drop=True)
+        # Re-assign SR Numbers from 1 onwards
+        df['sr'] = df.index + 1
+        df.drop(columns=['dt_temp'], inplace=True)
+        df.to_sql('movement', conn, if_exists='replace', index=False)
+        conn.commit()
+    return df
 
-        df["Date"] = pd.to_datetime(df["Date"])
+# --- EXCEL DOWNLOAD FUNCTION ---
+def to_excel(df):
+    output = io.BytesIO()
+    writer = pd.ExcelWriter(output, engine='xlsxwriter')
+    df.to_excel(writer, index=False, sheet_name='Movement_Report')
+    writer.close()
+    processed_data = output.getvalue()
+    return processed_data
 
-        today = datetime.date.today()
+# --- APP CONFIG ---
+st.set_page_config(page_title="KSAL Master System", layout="wide")
+st.sidebar.title("KSAL Logistics")
+menu = st.sidebar.radio("Navigation", ["DASHBOARD", "MOVEMENT ENTRY", "DIESEL ENTRY", "DIESEL CHART"])
 
-        if filter_type == "Today":
-            data = df[df["Date"].dt.date == today]
+# --- MENU: DASHBOARD ---
+if menu == "DASHBOARD":
+    st.title("📊 Dashboard & Reports")
+    df_sorted = sort_and_update_sr() # Ensure SRs are updated
+    
+    if not df_sorted.empty:
+        # Download Button for Excel
+        excel_data = to_excel(df_sorted)
+        st.download_button(label="📥 Download Movement Report (Excel)",
+                           data=excel_data,
+                           file_name=f'Movement_Report_{datetime.now().date()}.xlsx',
+                           mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+        
+        st.subheader("Live Movement Records (Auto-Sorted by Date/Time)")
+        st.dataframe(df_sorted)
 
-        elif filter_type == "Monthly":
-            data = df[df["Date"].dt.month == today.month]
+# --- MENU: MOVEMENT ENTRY ---
+elif menu == "MOVEMENT ENTRY":
+    st.title("🚛 Movement Entry")
+    
+    # Date and Time Inputs (Auto-sort based on these)
+    c_date, c_time = st.columns(2)
+    t_date = c_date.date_input("2. Date", value=datetime.now())
+    t_time = c_time.time_input("3. Time", value=datetime.now().time())
 
+    c_v, c_d = st.columns(2)
+    v_no = c_v.text_input("4. VEHICLE NUMBER")
+    d_name = c_d.text_input("5. DRIVER NAME")
+
+    # Size Selection (Triggers Container 2)
+    size = st.selectbox("8. SIZE", ["40", "20"])
+    c_cont1, c_cont2 = st.columns(2)
+    cont1 = c_cont1.text_input("6. CONTAINER-1 (11 Characters)", max_chars=11)
+    cont2 = ""
+    if size == "20":
+        cont2 = c_cont2.text_input("7. CONTAINER-2 (11 Characters)", max_chars=11)
+
+    status = st.selectbox("9. STATUS", ["LDD", "MTY"])
+
+    c_loc1, c_loc2, c_cyc, c_pty = st.columns(4)
+    f_loc = c_loc1.text_input("10. FROM")
+    t_loc = c_loc2.text_input("11. TO")
+    cycle = c_cyc.text_input("12. CYCLE")
+    party = c_pty.text_input("13. PARTY")
+
+    # Salary logic: Fixed 200 for both
+    salary = st.number_input("14. DRIVER SALARY", value=200.0)
+    t_status = st.selectbox("15. TRIP STATUS", ["FULL", "RETURN"])
+
+    # Diesel Calculation from Master Chart
+    route_key = f"{f_loc} to {t_loc}"
+    res = pd.read_sql(f"SELECT * FROM diesel_chart WHERE route='{route_key}'", conn)
+    d_work = 0.0
+    if not res.empty:
+        d_work = res.iloc[0]['full_diesel'] if t_status == "FULL" else res.iloc[0]['return_diesel']
+    
+    st.info(f"16. DIESEL WORK: {d_work} L")
+    remarks = st.text_area("17. REMARKS")
+
+    if st.button("SAVE MOVEMENT DATA"):
+        if v_no and cont1:
+            # Temporary SR placeholder, updated immediately by sort_and_update_sr
+            c.execute("INSERT INTO movement (date, time, v_no, name, cont1, cont2, size, status, src, dest, cycle, party, salary, trip_status, diesel_work, remarks) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", 
+                      (str(t_date), str(t_time), v_no, d_name, cont1, cont2, size, status, f_loc, t_loc, cycle, party, salary, t_status, d_work, remarks))
+            conn.commit()
+            sort_and_update_sr() # Critical: Re-sorts everything and re-assigns SR
+            st.success("Entry Saved! Sequence updated automatically.")
         else:
-            data = df[df["Date"].dt.year == today.year]
-
-        st.metric("Total Trips", len(data))
-
-    else:
-        st.info("No Data")
-
-# ---------------- MOVEMENT ENTRY ----------------
-
-elif menu == "Movement Entry":
-
-    st.title("Movement Entry")
-
-    with st.form("movement_form"):
-
-        col1,col2,col3 = st.columns(3)
-
-        sr = col1.number_input("SR",step=1)
-        date = col2.date_input("Date")
-        time = col3.time_input("Time")
-
-        vehicle = st.text_input("Vehicle Number")
-        name = st.text_input("Name")
-
-        container1 = st.text_input("Container 1 (11 char)")
-        container2 = st.text_input("Container 2")
-
-        size = st.selectbox("Size",["20","40"])
-
-        status = st.selectbox("Status",["MTY","LDD"])
-
-        frm = st.text_input("From")
-        to = st.text_input("To")
-
-        cycle = st.text_input("Cycle")
-        party = st.text_input("Party")
-
-        # Driver Salary Auto
-        if size == "40":
-            salary = 200
-        else:
-            salary = 400
-
-        st.write(f"Driver Salary Auto: {salary}")
-
-        trip_status = st.selectbox("Trip Status",["FULL","RETURN"])
-
-        work_diesel = st.number_input("Work Diesel")
-
-        remarks = st.text_input("Remarks")
-
-        submit = st.form_submit_button("Save")
-
-        if submit:
-
-            if len(container1) != 11:
-                st.error("Container1 must be 11 characters")
-            else:
-
-                new_row = pd.DataFrame([{
-                    "SR":sr,
-                    "Date":date,
-                    "Time":time,
-                    "Vehicle":vehicle,
-                    "Name":name,
-                    "Container1":container1,
-                    "Container2":container2 if size=="40" else "",
-                    "Size":size,
-                    "Status":status,
-                    "From":frm,
-                    "To":to,
-                    "Cycle":cycle,
-                    "Party":party,
-                    "DriverSalary":salary,
-                    "TripStatus":trip_status,
-                    "WorkDiesel":work_diesel,
-                    "Remarks":remarks
-                }])
-
-                st.session_state.movement = pd.concat(
-                    [st.session_state.movement,new_row],
-                    ignore_index=True
-                )
-
-                st.success("Saved")
-
-    # DELETE OPTION
-    st.subheader("Delete Movement")
-
-    df = st.session_state.movement
-
-    if not df.empty:
-
-        idx = st.selectbox("Select Index",df.index)
-
-        if st.button("Delete Movement"):
-
-            st.session_state.movement = df.drop(idx).reset_index(drop=True)
-
-            st.success("Deleted")
-
-        st.dataframe(st.session_state.movement)
-
-# ---------------- DIESEL ENTRY ----------------
-
-elif menu == "Diesel Entry":
-
-    st.title("Diesel Entry")
-
-    with st.form("diesel_form"):
-
-        date = st.date_input("Date")
-        vehicle = st.text_input("Vehicle")
-
-        liter = st.number_input("Diesel (Liter)")
-        driver = st.text_input("Driver")
-
-        rate = st.number_input("Rate")
-
-        pump = st.text_input("Pump Name")
-        paid = st.number_input("Paid Amount")
-
-        submit = st.form_submit_button("Save")
-
-        if submit:
-
-            amount = liter * rate
-
-            new_row = pd.DataFrame([{
-                "Date":date,
-                "Vehicle":vehicle,
-                "IssuedDiesel":liter,
-                "Driver":driver,
-                "Rate":rate,
-                "Amount":amount,
-                "Pump":pump,
-                "Paid":paid
-            }])
-
-            st.session_state.diesel = pd.concat(
-                [st.session_state.diesel,new_row],
-                ignore_index=True
-            )
-
-            st.success("Saved")
-
-    # DELETE
-    st.subheader("Delete Diesel Entry")
-
-    df = st.session_state.diesel
-
-    if not df.empty:
-
-        idx = st.selectbox("Select Index",df.index)
-
-        if st.button("Delete Diesel"):
-
-            st.session_state.diesel = df.drop(idx).reset_index(drop=True)
-
-            st.success("Deleted")
-
-        st.dataframe(st.session_state.diesel)
-
-# ---------------- DIESEL CHART ----------------
-
-elif menu == "Diesel Chart":
-
-    st.title("Diesel Chart")
-
-    d = st.session_state.diesel
-    m = st.session_state.movement
-
-    total = d["IssuedDiesel"].sum() if not d.empty else 0
-    used = m["WorkDiesel"].sum() if not m.empty else 0
-
-    balance = total - used
-
-    c1,c2,c3 = st.columns(3)
-
-    c1.metric("Total Diesel",total)
-    c2.metric("Used Diesel",used)
-    c3.metric("Balance",balance)
-
-    st.subheader("Vehicle Wise")
-
-    if not d.empty:
-
-        v = d.groupby("Vehicle")["IssuedDiesel"].sum().reset_index()
-
-        st.dataframe(v)
+            st.error("Missing Data")
+
+# --- OTHER MENUS (DIESEL ENTRY & CHART) ---
+elif menu == "DIESEL ENTRY":
+    st.title("⛽ Diesel Entry")
+    with st.form("d_form"):
+        d1, d2, d3 = st.columns(3)
+        date = d1.date_input("1. DATE")
+        v_no = d2.text_input("2. VEHICLE NUMBER")
+        issued = d3.number_input("3. ISSUED DIESEL (L)", min_value=0.0)
+        
+        d4, d5, d6 = st.columns(3)
+        name = d4.text_input("4. DRIVER NAME")
+        rate = d5.number_input("5. RATE", min_value=0.0)
+        pump = d6.text_input("7. PUMP NAME")
+        
+        paid = st.number_input("8. PAID AMOUNT", min_value=0.0)
+        amount = issued * rate 
+        out = amount - paid    
+        
+        if st.form_submit_button("Save Diesel Stock"):
+            c.execute("INSERT INTO diesel_entry VALUES (?,?,?,?,?,?,?,?,?)", 
+                      (str(date), v_no, issued, name, rate, amount, pump, paid, out))
+            conn.commit()
+            st.success(f"Diesel Entry Saved!")
+
+elif menu == "DIESEL CHART":
+    st.title("📋 Diesel Master Route Chart")
+    with st.form("route_form"):
+        r_name = st.text_input("Route Name (e.g. Mundra to Kandla)")
+        f_d = st.number_input("Full Trip Diesel (L)")
+        r_d = st.number_input("Return Trip Diesel (L)")
+        if st.form_submit_button("Update Route Chart"):
+            c.execute("INSERT OR REPLACE INTO diesel_chart VALUES (?,?,?)", (r_name, f_d, r_d))
+            conn.commit()
+            st.success("Route Updated")
+    st.table(pd.read_sql("SELECT * FROM diesel_chart", conn))
