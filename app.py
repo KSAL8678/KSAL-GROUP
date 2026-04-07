@@ -1,180 +1,243 @@
-import tkinter as tk
-from tkinter import ttk
-import sqlite3
-from datetime import datetime
+import streamlit as st
+import pandas as pd
+import datetime
 
-# DATABASE
-conn = sqlite3.connect("transport.db")
-cursor = conn.cursor()
+st.set_page_config(page_title="Transport System", layout="wide")
 
-cursor.execute("""
-CREATE TABLE IF NOT EXISTS movement(
-sr INTEGER,
-date TEXT,
-time TEXT,
-vehicle TEXT,
-name TEXT,
-container1 TEXT,
-container2 TEXT,
-size TEXT,
-status TEXT,
-frm TEXT,
-to_location TEXT,
-cycle TEXT,
-party TEXT,
-driver_salary INTEGER,
-trip_status TEXT,
-work_diesel INTEGER,
-remarks TEXT
+# ---------------- SESSION ----------------
+
+if "movement" not in st.session_state:
+    st.session_state.movement = pd.DataFrame(columns=[
+        "SR","Date","Time","Vehicle","Name","Container1","Container2","Size",
+        "Status","From","To","Cycle","Party","DriverSalary","TripStatus",
+        "WorkDiesel","Remarks"
+    ])
+
+if "diesel" not in st.session_state:
+    st.session_state.diesel = pd.DataFrame(columns=[
+        "Date","Vehicle","IssuedDiesel","Driver","Rate","Amount","Pump","Paid"
+    ])
+
+# ---------------- MENU ----------------
+
+menu = st.sidebar.selectbox(
+    "MENU",
+    ["Dashboard","Movement Entry","Diesel Entry","Diesel Chart"]
 )
-""")
 
-cursor.execute("""
-CREATE TABLE IF NOT EXISTS diesel(
-date TEXT,
-vehicle TEXT,
-issued_diesel INTEGER,
-driver TEXT,
-rate INTEGER,
-amount INTEGER,
-pump TEXT,
-paid INTEGER
-)
-""")
+# ---------------- DASHBOARD ----------------
 
-conn.commit()
+if menu == "Dashboard":
 
-# MAIN WINDOW
-root = tk.Tk()
-root.title("Transport Management System")
-root.geometry("900x600")
+    st.title("🚛 Transport Dashboard")
 
-# NOTEBOOK TABS
-notebook = ttk.Notebook(root)
-notebook.pack(fill="both", expand=True)
-
-dashboard_tab = tk.Frame(notebook)
-movement_tab = tk.Frame(notebook)
-diesel_tab = tk.Frame(notebook)
-
-notebook.add(dashboard_tab,text="Dashboard")
-notebook.add(movement_tab,text="Movement Entry")
-notebook.add(diesel_tab,text="Diesel Entry")
-
-# DASHBOARD
-
-tk.Label(dashboard_tab,text="Trip Filter").pack()
-
-trip_filter = ttk.Combobox(dashboard_tab)
-trip_filter['values']=("Today Trips","Monthly Trips","Yearly Trips")
-trip_filter.pack()
-
-tk.Label(dashboard_tab,text="Vehicle Diesel Stock").pack()
-
-vehicle_stock = ttk.Combobox(dashboard_tab)
-vehicle_stock.pack()
-
-# MOVEMENT ENTRY
-
-fields = [
-"SR","Date","Time","Vehicle Number","Name","Container1",
-"Container2","Size","Status","From","To","Cycle","Party",
-"Driver Salary","Trip Status","Work Diesel","Remarks"
-]
-
-entries={}
-
-for field in fields:
-    frame=tk.Frame(movement_tab)
-    frame.pack(fill="x")
-
-    label=tk.Label(frame,text=field,width=15)
-    label.pack(side="left")
-
-    entry=tk.Entry(frame)
-    entry.pack(side="left",fill="x",expand=True)
-
-    entries[field]=entry
-
-def save_movement():
-
-    data=(
-        entries["SR"].get(),
-        entries["Date"].get(),
-        entries["Time"].get(),
-        entries["Vehicle Number"].get(),
-        entries["Name"].get(),
-        entries["Container1"].get(),
-        entries["Container2"].get(),
-        entries["Size"].get(),
-        entries["Status"].get(),
-        entries["From"].get(),
-        entries["To"].get(),
-        entries["Cycle"].get(),
-        entries["Party"].get(),
-        entries["Driver Salary"].get(),
-        entries["Trip Status"].get(),
-        entries["Work Diesel"].get(),
-        entries["Remarks"].get()
+    filter_type = st.selectbox(
+        "Trip Filter",
+        ["Today","Monthly","Yearly"]
     )
 
-    cursor.execute("""
-    INSERT INTO movement VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-    """,data)
+    df = st.session_state.movement
 
-    conn.commit()
+    if not df.empty:
 
-    print("Movement Saved")
+        df["Date"] = pd.to_datetime(df["Date"])
 
-tk.Button(movement_tab,text="Save Movement",command=save_movement).pack()
+        today = datetime.date.today()
 
-# DIESEL ENTRY
+        if filter_type == "Today":
+            data = df[df["Date"].dt.date == today]
 
-diesel_fields=[
-"Date","Vehicle","Issued Diesel","Driver","Rate","Pump","Paid Amount"
-]
+        elif filter_type == "Monthly":
+            data = df[df["Date"].dt.month == today.month]
 
-diesel_entries={}
+        else:
+            data = df[df["Date"].dt.year == today.year]
 
-for field in diesel_fields:
+        st.metric("Total Trips", len(data))
 
-    frame=tk.Frame(diesel_tab)
-    frame.pack(fill="x")
+    else:
+        st.info("No Data")
 
-    label=tk.Label(frame,text=field,width=15)
-    label.pack(side="left")
+# ---------------- MOVEMENT ENTRY ----------------
 
-    entry=tk.Entry(frame)
-    entry.pack(side="left",fill="x",expand=True)
+elif menu == "Movement Entry":
 
-    diesel_entries[field]=entry
+    st.title("Movement Entry")
 
-def save_diesel():
+    with st.form("movement_form"):
 
-    rate=int(diesel_entries["Rate"].get())
-    liter=int(diesel_entries["Issued Diesel"].get())
+        col1,col2,col3 = st.columns(3)
 
-    amount=rate*liter
+        sr = col1.number_input("SR",step=1)
+        date = col2.date_input("Date")
+        time = col3.time_input("Time")
 
-    data=(
-        diesel_entries["Date"].get(),
-        diesel_entries["Vehicle"].get(),
-        liter,
-        diesel_entries["Driver"].get(),
-        rate,
-        amount,
-        diesel_entries["Pump"].get(),
-        diesel_entries["Paid Amount"].get()
-    )
+        vehicle = st.text_input("Vehicle Number")
+        name = st.text_input("Name")
 
-    cursor.execute("""
-    INSERT INTO diesel VALUES (?,?,?,?,?,?,?,?)
-    """,data)
+        container1 = st.text_input("Container 1 (11 char)")
+        container2 = st.text_input("Container 2")
 
-    conn.commit()
+        size = st.selectbox("Size",["20","40"])
 
-    print("Diesel Saved")
+        status = st.selectbox("Status",["MTY","LDD"])
 
-tk.Button(diesel_tab,text="Save Diesel",command=save_diesel).pack()
+        frm = st.text_input("From")
+        to = st.text_input("To")
 
-root.mainloop()
+        cycle = st.text_input("Cycle")
+        party = st.text_input("Party")
+
+        # Driver Salary Auto
+        if size == "40":
+            salary = 200
+        else:
+            salary = 400
+
+        st.write(f"Driver Salary Auto: {salary}")
+
+        trip_status = st.selectbox("Trip Status",["FULL","RETURN"])
+
+        work_diesel = st.number_input("Work Diesel")
+
+        remarks = st.text_input("Remarks")
+
+        submit = st.form_submit_button("Save")
+
+        if submit:
+
+            if len(container1) != 11:
+                st.error("Container1 must be 11 characters")
+            else:
+
+                new_row = pd.DataFrame([{
+                    "SR":sr,
+                    "Date":date,
+                    "Time":time,
+                    "Vehicle":vehicle,
+                    "Name":name,
+                    "Container1":container1,
+                    "Container2":container2 if size=="40" else "",
+                    "Size":size,
+                    "Status":status,
+                    "From":frm,
+                    "To":to,
+                    "Cycle":cycle,
+                    "Party":party,
+                    "DriverSalary":salary,
+                    "TripStatus":trip_status,
+                    "WorkDiesel":work_diesel,
+                    "Remarks":remarks
+                }])
+
+                st.session_state.movement = pd.concat(
+                    [st.session_state.movement,new_row],
+                    ignore_index=True
+                )
+
+                st.success("Saved")
+
+    # DELETE OPTION
+    st.subheader("Delete Movement")
+
+    df = st.session_state.movement
+
+    if not df.empty:
+
+        idx = st.selectbox("Select Index",df.index)
+
+        if st.button("Delete Movement"):
+
+            st.session_state.movement = df.drop(idx).reset_index(drop=True)
+
+            st.success("Deleted")
+
+        st.dataframe(st.session_state.movement)
+
+# ---------------- DIESEL ENTRY ----------------
+
+elif menu == "Diesel Entry":
+
+    st.title("Diesel Entry")
+
+    with st.form("diesel_form"):
+
+        date = st.date_input("Date")
+        vehicle = st.text_input("Vehicle")
+
+        liter = st.number_input("Diesel (Liter)")
+        driver = st.text_input("Driver")
+
+        rate = st.number_input("Rate")
+
+        pump = st.text_input("Pump Name")
+        paid = st.number_input("Paid Amount")
+
+        submit = st.form_submit_button("Save")
+
+        if submit:
+
+            amount = liter * rate
+
+            new_row = pd.DataFrame([{
+                "Date":date,
+                "Vehicle":vehicle,
+                "IssuedDiesel":liter,
+                "Driver":driver,
+                "Rate":rate,
+                "Amount":amount,
+                "Pump":pump,
+                "Paid":paid
+            }])
+
+            st.session_state.diesel = pd.concat(
+                [st.session_state.diesel,new_row],
+                ignore_index=True
+            )
+
+            st.success("Saved")
+
+    # DELETE
+    st.subheader("Delete Diesel Entry")
+
+    df = st.session_state.diesel
+
+    if not df.empty:
+
+        idx = st.selectbox("Select Index",df.index)
+
+        if st.button("Delete Diesel"):
+
+            st.session_state.diesel = df.drop(idx).reset_index(drop=True)
+
+            st.success("Deleted")
+
+        st.dataframe(st.session_state.diesel)
+
+# ---------------- DIESEL CHART ----------------
+
+elif menu == "Diesel Chart":
+
+    st.title("Diesel Chart")
+
+    d = st.session_state.diesel
+    m = st.session_state.movement
+
+    total = d["IssuedDiesel"].sum() if not d.empty else 0
+    used = m["WorkDiesel"].sum() if not m.empty else 0
+
+    balance = total - used
+
+    c1,c2,c3 = st.columns(3)
+
+    c1.metric("Total Diesel",total)
+    c2.metric("Used Diesel",used)
+    c3.metric("Balance",balance)
+
+    st.subheader("Vehicle Wise")
+
+    if not d.empty:
+
+        v = d.groupby("Vehicle")["IssuedDiesel"].sum().reset_index()
+
+        st.dataframe(v)
